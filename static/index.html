@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>To-Do List</title>
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 480px;
+    margin: 40px auto;
+    padding: 0 16px;
+    color: #222;
+  }
+  h1 { font-size: 1.5rem; }
+  form { display: flex; gap: 8px; margin-bottom: 16px; }
+  input[type="text"] {
+    flex: 1;
+    padding: 8px;
+    font-size: 1rem;
+  }
+  button {
+    padding: 8px 12px;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  ul { list-style: none; padding: 0; }
+  li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+  }
+  li span {
+    flex: 1;
+  }
+  li.done span {
+    text-decoration: line-through;
+    color: #999;
+  }
+  li button {
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+  }
+  #error {
+    color: #b00020;
+    margin-bottom: 12px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+  <h1>To-Do List</h1>
+  <div id="error"></div>
+  <form id="new-task-form">
+    <input type="text" id="new-task-title" placeholder="What needs doing?" required>
+    <button type="submit">Add</button>
+  </form>
+  <ul id="task-list"></ul>
+
+  <script>
+    const API = "/api/tasks";
+    const listEl = document.getElementById("task-list");
+    const formEl = document.getElementById("new-task-form");
+    const inputEl = document.getElementById("new-task-title");
+    const errorEl = document.getElementById("error");
+
+    function showError(message) {
+      errorEl.textContent = message;
+      errorEl.style.display = "block";
+    }
+
+    function clearError() {
+      errorEl.style.display = "none";
+    }
+
+    async function fetchTasks() {
+      try {
+        const res = await fetch(API);
+        if (!res.ok) throw new Error("Failed to load tasks");
+        const tasks = await res.json();
+        renderTasks(tasks);
+        clearError();
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    function renderTasks(tasks) {
+      listEl.innerHTML = "";
+      for (const task of tasks) {
+        const li = document.createElement("li");
+        li.className = task.done ? "done" : "";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = task.done;
+        checkbox.addEventListener("change", () => toggleDone(task, checkbox.checked));
+
+        const span = document.createElement("span");
+        span.textContent = task.title;
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.textContent = "✕";
+        deleteBtn.title = "Delete task";
+        deleteBtn.addEventListener("click", () => deleteTask(task.id));
+
+        li.append(checkbox, span, deleteBtn);
+        listEl.appendChild(li);
+      }
+    }
+
+    async function toggleDone(task, done) {
+      try {
+        const res = await fetch(`${API}/${task.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ done }),
+        });
+        if (!res.ok) throw new Error("Failed to update task");
+        await fetchTasks();
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    async function deleteTask(id) {
+      try {
+        const res = await fetch(`${API}/${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error("Failed to delete task");
+        await fetchTasks();
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    formEl.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const title = inputEl.value.trim();
+      if (!title) return;
+      try {
+        const res = await fetch(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        });
+        if (!res.ok) throw new Error("Failed to create task");
+        inputEl.value = "";
+        await fetchTasks();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    fetchTasks();
+  </script>
+</body>
+</html>
