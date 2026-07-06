@@ -1,5 +1,6 @@
 import sqlite3
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -20,10 +21,14 @@ def init_db():
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
-                done BOOLEAN NOT NULL DEFAULT 0
+                done BOOLEAN NOT NULL DEFAULT 0,
+                due_date TEXT
             )
             """
         )
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+        if "due_date" not in columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN due_date TEXT")
 
 
 @contextmanager
@@ -41,17 +46,20 @@ def get_db():
 class TaskCreate(BaseModel):
     title: str
     done: bool = False
+    due_date: Optional[date] = None
 
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     done: Optional[bool] = None
+    due_date: Optional[date] = None
 
 
 class Task(BaseModel):
     id: int
     title: str
     done: bool
+    due_date: Optional[date] = None
 
 
 @app.on_event("startup")
@@ -62,7 +70,9 @@ def on_startup():
 @app.get("/api/tasks", response_model=list[Task])
 def list_tasks():
     with get_db() as conn:
-        rows = conn.execute("SELECT id, title, done FROM tasks ORDER BY id").fetchall()
+        rows = conn.execute(
+            "SELECT id, title, done, due_date FROM tasks ORDER BY id"
+        ).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -70,10 +80,11 @@ def list_tasks():
 def create_task(task: TaskCreate):
     with get_db() as conn:
         cursor = conn.execute(
-            "INSERT INTO tasks (title, done) VALUES (?, ?)", (task.title, task.done)
+            "INSERT INTO tasks (title, done, due_date) VALUES (?, ?, ?)",
+            (task.title, task.done, task.due_date.isoformat() if task.due_date else None),
         )
         row = conn.execute(
-            "SELECT id, title, done FROM tasks WHERE id = ?", (cursor.lastrowid,)
+            "SELECT id, title, done, due_date FROM tasks WHERE id = ?", (cursor.lastrowid,)
         ).fetchone()
         return dict(row)
 
@@ -82,20 +93,26 @@ def create_task(task: TaskCreate):
 def update_task(task_id: int, task: TaskUpdate):
     with get_db() as conn:
         existing = conn.execute(
-            "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
+            "SELECT id, title, done, due_date FROM tasks WHERE id = ?", (task_id,)
         ).fetchone()
         if existing is None:
             raise HTTPException(status_code=404, detail="Task not found")
 
-        new_title = task.title if task.title is not None else existing["title"]
-        new_done = task.done if task.done is not None else existing["done"]
+        # exclude_unset lets clients omit a field to keep it unchanged, while an
+        # explicit `null` (e.g. due_date) clears it.
+        updates = task.model_dump(exclude_unset=True)
+        new_title = updates.get("title", existing["title"])
+        new_done = updates.get("done", existing["done"])
+        new_due_date = updates.get("due_date", existing["due_date"])
+        if isinstance(new_due_date, date):
+            new_due_date = new_due_date.isoformat()
 
         conn.execute(
-            "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
-            (new_title, new_done, task_id),
+            "UPDATE tasks SET title = ?, done = ?, due_date = ? WHERE id = ?",
+            (new_title, new_done, new_due_date, task_id),
         )
         row = conn.execute(
-            "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
+            "SELECT id, title, done, due_date FROM tasks WHERE id = ?", (task_id,)
         ).fetchone()
         return dict(row)
 

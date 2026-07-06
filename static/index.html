@@ -31,12 +31,22 @@
     padding: 8px 0;
     border-bottom: 1px solid #eee;
   }
-  li span {
+  li span.title {
     flex: 1;
   }
-  li.done span {
+  li.done span.title {
     text-decoration: line-through;
     color: #999;
+  }
+  li input[type="date"] {
+    font-size: 0.85rem;
+    color: #666;
+    border: none;
+    background: none;
+  }
+  li.overdue input[type="date"] {
+    color: #b00020;
+    font-weight: bold;
   }
   li button {
     background: none;
@@ -55,6 +65,7 @@
   <div id="error"></div>
   <form id="new-task-form">
     <input type="text" id="new-task-title" placeholder="What needs doing?" required>
+    <input type="date" id="new-task-due-date">
     <button type="submit">Add</button>
   </form>
   <ul id="task-list"></ul>
@@ -64,7 +75,12 @@
     const listEl = document.getElementById("task-list");
     const formEl = document.getElementById("new-task-form");
     const inputEl = document.getElementById("new-task-title");
+    const dueDateInputEl = document.getElementById("new-task-due-date");
     const errorEl = document.getElementById("error");
+
+    function todayISO() {
+      return new Date().toISOString().slice(0, 10);
+    }
 
     function showError(message) {
       errorEl.textContent = message;
@@ -91,7 +107,8 @@
       listEl.innerHTML = "";
       for (const task of tasks) {
         const li = document.createElement("li");
-        li.className = task.done ? "done" : "";
+        const overdue = task.due_date && !task.done && task.due_date < todayISO();
+        li.className = [task.done ? "done" : "", overdue ? "overdue" : ""].join(" ").trim();
 
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
@@ -99,14 +116,21 @@
         checkbox.addEventListener("change", () => toggleDone(task, checkbox.checked));
 
         const span = document.createElement("span");
+        span.className = "title";
         span.textContent = task.title;
+
+        const dueDateInput = document.createElement("input");
+        dueDateInput.type = "date";
+        dueDateInput.value = task.due_date || "";
+        dueDateInput.title = "Due date";
+        dueDateInput.addEventListener("change", () => setDueDate(task, dueDateInput.value));
 
         const deleteBtn = document.createElement("button");
         deleteBtn.textContent = "✕";
         deleteBtn.title = "Delete task";
         deleteBtn.addEventListener("click", () => deleteTask(task.id));
 
-        li.append(checkbox, span, deleteBtn);
+        li.append(checkbox, span, dueDateInput, deleteBtn);
         listEl.appendChild(li);
       }
     }
@@ -119,6 +143,20 @@
           body: JSON.stringify({ done }),
         });
         if (!res.ok) throw new Error("Failed to update task");
+        await fetchTasks();
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    async function setDueDate(task, dueDate) {
+      try {
+        const res = await fetch(`${API}/${task.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ due_date: dueDate || null }),
+        });
+        if (!res.ok) throw new Error("Failed to update due date");
         await fetchTasks();
       } catch (err) {
         showError(err.message);
@@ -143,10 +181,11 @@
         const res = await fetch(API, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title }),
+          body: JSON.stringify({ title, due_date: dueDateInputEl.value || null }),
         });
         if (!res.ok) throw new Error("Failed to create task");
         inputEl.value = "";
+        dueDateInputEl.value = "";
         await fetchTasks();
       } catch (err) {
         showError(err.message);
