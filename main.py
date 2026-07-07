@@ -1,17 +1,41 @@
+import os
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-DB_PATH = Path(__file__).parent / "todo.db"
+DB_PATH = Path(os.environ.get("DB_PATH", Path(__file__).parent / "todo.db"))
 
-app = FastAPI(title="To-Do List API")
+APP_USERNAME = os.environ.get("APP_USERNAME")
+APP_PASSWORD = os.environ.get("APP_PASSWORD")
+
+if not APP_USERNAME or not APP_PASSWORD:
+    raise RuntimeError(
+        "APP_USERNAME and APP_PASSWORD environment variables must be set"
+    )
+
+basic_auth = HTTPBasic()
+
+
+def require_auth(credentials: HTTPBasicCredentials = Depends(basic_auth)):
+    valid_username = secrets.compare_digest(credentials.username, APP_USERNAME)
+    valid_password = secrets.compare_digest(credentials.password, APP_PASSWORD)
+    if not (valid_username and valid_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+
+app = FastAPI(title="To-Do List API", dependencies=[Depends(require_auth)])
 
 
 def init_db():
@@ -127,9 +151,6 @@ def delete_task(task_id: int):
             raise HTTPException(status_code=404, detail="Task not found")
         conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     return None
-
-
-app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
 @app.get("/")
